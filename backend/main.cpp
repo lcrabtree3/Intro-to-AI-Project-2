@@ -13,19 +13,42 @@ using json = nlohmann::json;
 
 GameState game;
 
-struct PerSocketData {};
+struct PerSocketData {
+    int playerId = -1;
+};
 
 using SocketType = uWS::WebSocket<false, true, PerSocketData>;
 static std::vector<SocketType*> clients;
 
-static void broadcastState() {
-    json state = game.toJSON();
-    std::string payload = state.dump();
+static int getNextAvailablePlayerId() {
+    bool playerTaken[2] = {false, false};
 
     for (auto* client : clients) {
-        if (client) {
-            client->send(payload, uWS::OpCode::TEXT);
+        if (!client) continue;
+        int id = client->getUserData()->playerId;
+        if (id >= 0 && id < 2) {
+            playerTaken[id] = true;
         }
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        if (!playerTaken[i]) return i;
+    }
+
+    return -1;
+}
+
+static void sendState(SocketType* client) {
+    if (!client) return;
+
+    json state = game.toJSON();
+    state["yourPlayerId"] = client->getUserData()->playerId;
+    client->send(state.dump(), uWS::OpCode::TEXT);
+}
+
+static void broadcastState() {
+    for (auto* client : clients) {
+        sendState(client);
     }
 }
 
@@ -49,35 +72,40 @@ int main() {
 
     uWS::App().ws<PerSocketData>("/*", {
         .open = [](auto* ws) {
+            ws->getUserData()->playerId = getNextAvailablePlayerId();
             clients.push_back(ws);
             std::cout << "Client connected\n";
 
-            json state = game.toJSON();
-            ws->send(state.dump(), uWS::OpCode::TEXT);
+            sendState(ws);
         },
 
         .message = [](auto* ws, std::string_view message, uWS::OpCode) {
             try {
                 json msg = json::parse(message);
                 std::string type = msg.value("type", "");
+                int playerId = ws->getUserData()->playerId;
+
+                if (playerId < 0 || playerId > 1) {
+                    sendState(ws);
+                    return;
+                }
 
                 if (type == "move") {
-                    game.movePlayer(msg.value("player", 0), msg.value("dx", 0), msg.value("dy", 0));
+                    game.movePlayer(playerId, msg.value("dx", 0), msg.value("dy", 0));
                 } else if (type == "action") {
-                    game.processAction(msg.value("player", 0), msg.value("action", ""));
+                    game.processAction(playerId, msg.value("action", ""));
                 } else if (type == "combat") {
-                    game.combatTurn(msg.value("player", 0), msg.value("choice", ""));
+                    game.combatTurn(playerId, msg.value("choice", ""));
                 } else if (type == "usePotion") {
-                    game.usePotion(msg.value("player", 0));
+                    game.usePotion(playerId);
                 } else if (type == "chat") {
-                    game.addChatMessage(msg.value("player", 0), msg.value("text", ""));
+                    game.addChatMessage(playerId, msg.value("text", ""));
                 }
 
                 broadcastState();
             } catch (const std::exception& e) {
                 std::cerr << "Message handling error: " << e.what() << "\n";
-                json state = game.toJSON();
-                ws->send(state.dump(), uWS::OpCode::TEXT);
+                sendState(ws);
             }
         },
 

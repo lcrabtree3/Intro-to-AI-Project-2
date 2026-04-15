@@ -30,19 +30,21 @@
                 </div>
             </section>
 
-            <section class="panel" id="narrativePanel">
-                <div class="panelTitle">AI Narrative Window</div>
-                <div id="narrative" class="panelBody"></div>
-            </section>
+            <div id="rightColumn">
+                <section class="panel" id="chatPanel">
+                    <div class="panelTitle">Chat Panel</div>
+                    <div id="chatMessages" class="panelBody"></div>
+                    <div class="chatInputRow">
+                        <input id="chatInput" placeholder="Type chat message...">
+                        <button onclick="sendChat()">Send</button>
+                    </div>
+                </section>
 
-            <section class="panel" id="chatPanel">
-                <div class="panelTitle">Chat Panel</div>
-                <div id="chatMessages" class="panelBody"></div>
-                <div class="chatInputRow">
-                    <input id="chatInput" placeholder="Type chat message...">
-                    <button onclick="sendChat()">Send</button>
-                </div>
-            </section>
+                <section class="panel" id="narrativePanel">
+                    <div class="panelTitle">AI Narrative Window</div>
+                    <div id="narrative" class="panelBody"></div>
+                </section>
+            </div>
 
             <section class="panel" id="controlsPanel">
                 <div class="panelTitle">Map Interactive Responses Panel</div>
