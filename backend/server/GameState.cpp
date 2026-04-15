@@ -5,6 +5,7 @@
 #include "AI.h"
 #include <cstdlib>
 #include <algorithm>
+#include <sstream>
 
 using json = nlohmann::json;
 
@@ -26,6 +27,7 @@ void GameState::generateMap() {
     fog = std::vector<std::vector<bool>>(MAP_SIZE, std::vector<bool>(MAP_SIZE, false));
     items.clear();
     chatLog.clear();
+    actionLog.clear();
 
     players[0] = Player{};
     players[1] = Player{};
@@ -55,6 +57,7 @@ void GameState::generateMap() {
     bossHealth = 5;
     inCombat = false;
     currentTurn = 0;
+    resetCombatRound();
 
     reveal(fog, players[0].x, players[0].y, 2);
     reveal(fog, players[1].x, players[1].y, 2);
@@ -96,6 +99,20 @@ void GameState::removeOneItem(int id, ItemType type) {
 
 int GameState::weaponBonus(int id) const {
     return countItem(id, WEAPON);
+}
+
+void GameState::appendActionHistory(const std::string& entry) {
+    actionLog.push_back(entry);
+    if (actionLog.size() > 20) {
+        actionLog.erase(actionLog.begin());
+    }
+}
+
+void GameState::resetCombatRound() {
+    combatSubmitted[0] = false;
+    combatSubmitted[1] = false;
+    combatActions[0].clear();
+    combatActions[1].clear();
 }
 
 void GameState::checkPickup(int id) {
@@ -152,11 +169,15 @@ void GameState::movePlayer(int id, int dx, int dy) {
         if (playerHasItem(id, KEY)) {
             portalUnlocked = true;
             inCombat = true;
+            bossHealth = std::max(1, bossHealth);
+            resetCombatRound();
+            currentTurn = 0;
+
             lastNarrative = generateNarrative(
                 "Portal event. Player " + std::to_string(id + 1) +
                 " reaches the portal while carrying the KEY. "
                 "Ancient energy surges through the shared battlefield and the boss appears. "
-                "Combat begins now."
+                "Combat begins now. Player 1 responds first, then Player 2."
             );
             return;
         } else {
@@ -187,6 +208,9 @@ void GameState::movePlayer(int id, int dx, int dy) {
 
 void GameState::processAction(int id, const std::string& action) {
     if (id != currentTurn || inCombat) return;
+    if (action.empty()) return;
+
+    appendActionHistory("Player " + std::to_string(id + 1) + ": " + action);
 
     lastNarrative = generateNarrative(
         "Action update. Player " + std::to_string(id + 1) +
@@ -205,46 +229,70 @@ void GameState::processAction(int id, const std::string& action) {
     nextTurn();
 }
 
-void GameState::combatTurn(int id, const std::string& choice) {
-    if (id != currentTurn || !inCombat) return;
+void GameState::finalizeCombatRound() {
+    if (!combatSubmitted[0] || !combatSubmitted[1]) {
+        return;
+    }
 
-    std::string result = resolveCombat(choice);
+    std::ostringstream summary;
 
-    if (result == "Win") {
-        int damage = 1 + weaponBonus(id);
-        bossHealth -= damage;
-        if (bossHealth < 0) bossHealth = 0;
+    for (int id = 0; id < 2; ++id) {
+        const std::string& action = combatActions[id];
 
-        lastNarrative = generateNarrative(
-            "Combat round. Player " + std::to_string(id + 1) +
-            " chooses " + choice + " and defeats the boss move. "
-            "Damage dealt: " + std::to_string(damage) + ". "
-            "Boss health is now " + std::to_string(bossHealth) + "."
-        );
-    } else if (result == "Tie") {
-        players[id].health = std::max(0, players[id].health - 1);
+        if (action == "potion") {
+            if (playerHasItem(id, POTION)) {
+                removeOneItem(id, POTION);
+                players[id].health = std::min(players[id].health + 3, MAX_HEALTH);
 
-        lastNarrative = generateNarrative(
-            "Combat round. Player " + std::to_string(id + 1) +
-            " chooses " + choice + " and ties with the boss. "
-            "Player " + std::to_string(id + 1) +
-            " still takes 1 damage and now has health " + std::to_string(players[id].health) + "."
-        );
-    } else {
-        players[id].health = std::max(0, players[id].health - 1);
+                summary
+                    << "Player " << (id + 1)
+                    << " drinks a POTION and now has health "
+                    << players[id].health
+                    << " with potions=" << countItem(id, POTION) << ". ";
+            } else {
+                summary
+                    << "Player " << (id + 1)
+                    << " tries to use a POTION but has none remaining. ";
+            }
+            continue;
+        }
 
-        lastNarrative = generateNarrative(
-            "Combat round. Player " + std::to_string(id + 1) +
-            " chooses " + choice + " and loses the exchange. "
-            "Player " + std::to_string(id + 1) +
-            " takes 1 damage and now has health " + std::to_string(players[id].health) + "."
-        );
+        std::string result = resolveCombat(action);
+
+        if (result == "Win") {
+            int damage = 1 + weaponBonus(id);
+            bossHealth -= damage;
+            if (bossHealth < 0) bossHealth = 0;
+
+            summary
+                << "Player " << (id + 1)
+                << " chooses " << action
+                << " and wins the exchange, dealing "
+                << damage << " damage. ";
+        } else if (result == "Tie") {
+            players[id].health = std::max(0, players[id].health - 1);
+
+            summary
+                << "Player " << (id + 1)
+                << " chooses " << action
+                << " and ties, taking 1 damage. ";
+        } else {
+            players[id].health = std::max(0, players[id].health - 1);
+
+            summary
+                << "Player " << (id + 1)
+                << " chooses " << action
+                << " and loses, taking 1 damage. ";
+        }
     }
 
     if (bossHealth <= 0) {
         inCombat = false;
+        resetCombatRound();
+
         lastNarrative = generateNarrative(
-            "Victory event. The boss collapses after the cooperative assault. "
+            "Victory event. " + summary.str() +
+            " The boss collapses after the cooperative assault. "
             "The portal chamber falls silent and the players survive the encounter."
         );
         return;
@@ -252,39 +300,66 @@ void GameState::combatTurn(int id, const std::string& choice) {
 
     if (players[0].health <= 0 && players[1].health <= 0) {
         inCombat = false;
+        resetCombatRound();
+
         lastNarrative = generateNarrative(
-            "Defeat event. Both players have fallen during the boss encounter. "
+            "Defeat event. " + summary.str() +
+            " Both players have fallen during the boss encounter. "
             "The portal remains in darkness."
         );
         return;
     }
 
-    nextTurn();
+    int nextRoundStarter = 0;
+    resetCombatRound();
+    currentTurn = nextRoundStarter;
+
+    lastNarrative = generateNarrative(
+        "Combat round summary. " + summary.str() +
+        " Boss health is now " + std::to_string(bossHealth) + ". "
+        "Player 1 health=" + std::to_string(players[0].health) + ". "
+        "Player 2 health=" + std::to_string(players[1].health) + ". "
+        "The next combat round begins, with Player 1 acting first."
+    );
+}
+
+void GameState::combatTurn(int id, const std::string& choice) {
+    if (id != currentTurn || !inCombat) return;
+    if (combatSubmitted[id]) return;
+    if (choice != "rock" && choice != "paper" && choice != "scissors") return;
+
+    combatSubmitted[id] = true;
+    combatActions[id] = choice;
+
+    if (!combatSubmitted[0] || !combatSubmitted[1]) {
+        currentTurn = (id + 1) % 2;
+        lastNarrative =
+            "Combat round in progress. Player " + std::to_string(id + 1) +
+            " has locked in a choice. Waiting for Player " +
+            std::to_string(currentTurn + 1) + ".";
+        return;
+    }
+
+    finalizeCombatRound();
 }
 
 void GameState::usePotion(int id) {
     if (id != currentTurn || !inCombat) return;
+    if (combatSubmitted[id]) return;
 
-    if (!playerHasItem(id, POTION)) {
-        lastNarrative = generateNarrative(
-            "Combat support action. Player " + std::to_string(id + 1) +
-            " tries to use a POTION, but none remain in inventory."
-        );
+    combatSubmitted[id] = true;
+    combatActions[id] = "potion";
+
+    if (!combatSubmitted[0] || !combatSubmitted[1]) {
+        currentTurn = (id + 1) % 2;
+        lastNarrative =
+            "Combat round in progress. Player " + std::to_string(id + 1) +
+            " has chosen a support action. Waiting for Player " +
+            std::to_string(currentTurn + 1) + ".";
         return;
     }
 
-    removeOneItem(id, POTION);
-    players[id].health = std::min(players[id].health + 3, MAX_HEALTH);
-
-    lastNarrative = generateNarrative(
-        "Combat support action. Player " + std::to_string(id + 1) +
-        " drinks a POTION and recovers health. "
-        "Player " + std::to_string(id + 1) +
-        " now has health " + std::to_string(players[id].health) +
-        " and potions=" + std::to_string(countItem(id, POTION)) + "."
-    );
-
-    nextTurn();
+    finalizeCombatRound();
 }
 
 void GameState::addChatMessage(int id, const std::string& text) {
@@ -293,6 +368,14 @@ void GameState::addChatMessage(int id, const std::string& text) {
     if (chatLog.size() > 30) {
         chatLog.erase(chatLog.begin());
     }
+}
+
+void GameState::forceCombatForTesting(int startingPlayer) {
+    inCombat = true;
+    bossHealth = 5;
+    currentTurn = std::max(0, std::min(1, startingPlayer));
+    resetCombatRound();
+    lastNarrative = "Combat test state initialized.";
 }
 
 json GameState::toJSON() {
@@ -326,6 +409,8 @@ json GameState::toJSON() {
         {"inCombat", inCombat},
         {"currentTurn", currentTurn},
         {"chat", chatLog},
+        {"actionHistory", actionLog},
+        {"combatSubmitted", {combatSubmitted[0], combatSubmitted[1]}},
         {"narrative", lastNarrative},
         {"modelLoaded", isNarrativeModelLoaded()}
     };

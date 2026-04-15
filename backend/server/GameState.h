@@ -21,6 +21,8 @@ public:
     void usePotion(int id);
     void addChatMessage(int id, const std::string& text);
 
+    void forceCombatForTesting(int startingPlayer = 0);
+
     nlohmann::json toJSON();
 
 private:
@@ -30,6 +32,7 @@ private:
     std::vector<std::vector<bool>> fog;
     std::vector<Item> items;
     std::vector<std::string> chatLog;
+    std::vector<std::string> actionLog;
 
     int portalX = 0;
     int portalY = 0;
@@ -38,6 +41,9 @@ private:
     int bossHealth = 5;
     bool inCombat = false;
     int currentTurn = 0;
+
+    bool combatSubmitted[2] = {false, false};
+    std::string combatActions[2];
 
     std::string lastNarrative;
 
@@ -48,4 +54,8 @@ private:
     int countItem(int id, ItemType type) const;
     void removeOneItem(int id, ItemType type);
     int weaponBonus(int id) const;
+
+    void appendActionHistory(const std::string& entry);
+    void resetCombatRound();
+    void finalizeCombatRound();
 };

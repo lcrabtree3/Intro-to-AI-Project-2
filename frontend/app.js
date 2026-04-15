@@ -4,7 +4,9 @@ const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
 
 let state = null;
-let myPlayerId = 0;
+let myPlayerId = -1;
+let viewPlayerId = 0;
+let assignedPlayerId = null;
 let selectedDescription = "Click a revealed tile, item, portal, or player for details.";
 
 const MAP_TILES = 20;
@@ -19,8 +21,12 @@ const controlsBodyEl = document.getElementById("controlsBody");
 const inventoryEl = document.getElementById("inventory");
 const statusEl = document.getElementById("status");
 
+function getControlledPlayerId() {
+    return myPlayerId >= 0 ? myPlayerId : 0;
+}
+
 ws.onopen = () => {
-    statusEl.innerText = `Connected as Player ${myPlayerId + 1}`;
+    statusEl.innerText = "Connected. Waiting for player assignment...";
 };
 
 ws.onclose = () => {
@@ -32,7 +38,16 @@ ws.onerror = () => {
 };
 
 ws.onmessage = (msg) => {
-    state = JSON.parse(msg.data);
+    const incoming = JSON.parse(msg.data);
+
+    if (typeof incoming.yourPlayerId === "number" && incoming.yourPlayerId >= 0 && assignedPlayerId === null) {
+        assignedPlayerId = incoming.yourPlayerId;
+        myPlayerId = incoming.yourPlayerId;
+        viewPlayerId = incoming.yourPlayerId;
+    }
+
+    delete incoming.yourPlayerId;
+    state = incoming;
     render();
 };
 
@@ -48,14 +63,28 @@ function sendAction() {
 
     const action = input.value.trim();
     if (!action) return;
+    if (!state) return;
+
+    const controlledPlayerId = getControlledPlayerId();
+
+    if (state.inCombat) {
+        statusEl.innerText = "Use the combat controls during combat.";
+        return;
+    }
+
+    if (state.currentTurn !== controlledPlayerId) {
+        statusEl.innerText = `Waiting for Player ${state.currentTurn + 1}`;
+        return;
+    }
 
     sendMessage({
         type: "action",
-        player: myPlayerId,
+        player: controlledPlayerId,
         action
     });
 
     input.value = "";
+    statusEl.innerText = `Player ${controlledPlayerId + 1} action sent. Waiting for update...`;
 }
 
 function sendChat() {
@@ -64,7 +93,7 @@ function sendChat() {
 
     sendMessage({
         type: "chat",
-        player: myPlayerId,
+        player: getControlledPlayerId(),
         text
     });
 
@@ -77,52 +106,59 @@ function move(dx, dy) {
         return;
     }
 
+    const controlledPlayerId = getControlledPlayerId();
+
     if (state.inCombat) {
         statusEl.innerText = "Movement disabled during combat.";
         return;
     }
 
-    if (state.currentTurn !== myPlayerId) {
+    if (state.currentTurn !== controlledPlayerId) {
         statusEl.innerText = `Waiting for Player ${state.currentTurn + 1}`;
         return;
     }
 
     sendMessage({
         type: "move",
-        player: myPlayerId,
+        player: controlledPlayerId,
         dx,
         dy
     });
 
-    statusEl.innerText = `Player ${myPlayerId + 1} moved. Waiting for update...`;
+    statusEl.innerText = `Player ${controlledPlayerId + 1} moved. Waiting for update...`;
 }
 
 function chooseCombat(choice) {
     if (!state) return;
+
+    const controlledPlayerId = getControlledPlayerId();
+
     if (!state.inCombat) return;
-    if (state.currentTurn !== myPlayerId) return;
+    if (state.currentTurn !== controlledPlayerId) return;
 
     sendMessage({
         type: "combat",
-        player: myPlayerId,
+        player: controlledPlayerId,
         choice
     });
 }
 
 function usePotion() {
     if (!state) return;
+
+    const controlledPlayerId = getControlledPlayerId();
+
     if (!state.inCombat) return;
-    if (state.currentTurn !== myPlayerId) return;
+    if (state.currentTurn !== controlledPlayerId) return;
 
     sendMessage({
         type: "usePotion",
-        player: myPlayerId
+        player: controlledPlayerId
     });
 }
 
 function switchPlayer(id) {
-    myPlayerId = id;
-    statusEl.innerText = `Connected as Player ${myPlayerId + 1}`;
+    viewPlayerId = id;
     render();
 }
 
@@ -199,12 +235,15 @@ function render() {
     renderInventory();
     renderControls();
 
-    if (state.currentTurn === myPlayerId && !state.inCombat) {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — your turn`;
-    } else if (state.currentTurn === myPlayerId && state.inCombat) {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — combat turn`;
+    const controlledPlayerId = getControlledPlayerId();
+    const viewText = viewPlayerId !== controlledPlayerId ? ` — viewing Player ${viewPlayerId + 1}` : "";
+
+    if (state.currentTurn === controlledPlayerId && !state.inCombat) {
+        statusEl.innerText = `Connected as Player ${controlledPlayerId + 1} — your turn${viewText}`;
+    } else if (state.currentTurn === controlledPlayerId && state.inCombat) {
+        statusEl.innerText = `Connected as Player ${controlledPlayerId + 1} — combat turn${viewText}`;
     } else {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — waiting for Player ${state.currentTurn + 1}`;
+        statusEl.innerText = `Connected as Player ${controlledPlayerId + 1} — waiting for Player ${state.currentTurn + 1}${viewText}`;
     }
 }
 
@@ -282,7 +321,9 @@ function renderMap() {
 
             ctx.fillStyle = "white";
             ctx.font = `${Math.max(10, tileSize * 0.35)}px Arial`;
-            ctx.fillText(String(p.idx + 1), baseX + offsetX - tileSize * 0.08, baseY + tileSize * 0.08);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(String(p.idx + 1), baseX + offsetX, baseY);
         });
     });
 }
@@ -291,6 +332,8 @@ function renderNarrative() {
     const playerTurnText = state.inCombat
         ? `Combat turn: Player ${state.currentTurn + 1}`
         : `Exploration turn: Player ${state.currentTurn + 1}`;
+
+    const modelText = state.modelLoaded ? "Local model active" : "Fallback narrative active";
 
     narrativeEl.innerHTML = `
         <div class="summaryBox">
@@ -302,6 +345,8 @@ function renderNarrative() {
             <div class="panelSection">${escapeHtml(playerTurnText)}</div>
             <div class="panelSection"><strong>Boss Health</strong></div>
             <div class="panelSection">${state.inCombat ? state.bossHealth : "No active boss fight"}</div>
+            <div class="panelSection"><strong>Narrative Engine</strong></div>
+            <div class="panelSection">${escapeHtml(modelText)}</div>
         </div>
     `;
 }
@@ -314,7 +359,7 @@ function renderChat() {
 
 function renderInventory() {
     inventoryEl.innerHTML = state.players.map((p, idx) => `
-        <div class="inventoryBlock ${idx === myPlayerId ? "activePlayer" : ""}">
+        <div class="inventoryBlock ${idx === viewPlayerId ? "activePlayer" : ""}">
             <div><strong>Player ${idx + 1}</strong></div>
             <div>Health: ${p.health}</div>
             <div>Weapons: ${p.weaponCount}</div>
@@ -328,14 +373,19 @@ function renderInventory() {
 function renderControls() {
     if (!state) return;
 
-    const isMyTurn = state.currentTurn === myPlayerId;
+    const controlledPlayerId = getControlledPlayerId();
+    const isMyTurn = state.currentTurn === controlledPlayerId;
     const turnText = isMyTurn ? "Your turn" : `Waiting for Player ${state.currentTurn + 1}`;
 
     if (state.inCombat) {
+        const submitted = state.combatSubmitted || [false, false];
+
         controlsBodyEl.innerHTML = `
             <div class="summaryBox">
                 <div class="panelSection"><strong>${turnText}</strong></div>
-                <div class="panelSection">Choose Rock, Paper, or Scissors. Use a POTION if needed.</div>
+                <div class="panelSection">Combat resolves after both players respond. Player 1 submits first, then Player 2.</div>
+                <div class="panelSection">Player 1 submitted: ${submitted[0] ? "Yes" : "No"}</div>
+                <div class="panelSection">Player 2 submitted: ${submitted[1] ? "Yes" : "No"}</div>
             </div>
 
             <div class="buttonRow">
@@ -358,10 +408,15 @@ function renderControls() {
         return;
     }
 
+    const actionHistory = state.actionHistory || [];
+    const actionHistoryHtml = actionHistory.length
+        ? actionHistory.map(line => `<div class="chatLine">${escapeHtml(line)}</div>`).join("")
+        : `<div class="panelSection">No exploration actions yet.</div>`;
+
     controlsBodyEl.innerHTML = `
         <div class="summaryBox">
             <div class="panelSection"><strong>${turnText}</strong></div>
-            <div class="panelSection">Both players share the same map. They may stand on the same tile.</div>
+            <div class="panelSection">Arrow buttons move your player. "Describe an action" is for exploration actions like inspect, search, speak, examine, or interact. It should update the AI narrative and then pass the turn.</div>
         </div>
 
         <div class="controlsTopRow">
@@ -379,7 +434,7 @@ function renderControls() {
 
             <div class="controlsInfo">
                 <div class="actionRow">
-                    <input id="actionInput" placeholder="Describe an action...">
+                    <input id="actionInput" placeholder="Describe an exploration action...">
                     <button id="send-action" ${!isMyTurn ? "disabled" : ""}>Send Action</button>
                 </div>
 
@@ -388,6 +443,11 @@ function renderControls() {
                     <button id="switch-p2">View as Player 2</button>
                 </div>
             </div>
+        </div>
+
+        <div class="selectionBox">
+            <div class="panelSection"><strong>Action History</strong></div>
+            <div class="panelSection">${actionHistoryHtml}</div>
         </div>
 
         <div class="selectionBox">
