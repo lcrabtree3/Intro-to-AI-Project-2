@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Co-op AI Dungeon Master</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="windowFrame">
+        <div id="titleBar">
+            <div id="titleText">Co-op AI Dungeon Master</div>
+            <div id="windowButtons">
+                <span class="windowBtn">—</span>
+                <span class="windowBtn">□</span>
+                <span class="windowBtn">✕</span>
+            </div>
+        </div>
+
+        <div id="topStatusBar">
+            <div id="status">Connecting...</div>
+            <div id="inventory"></div>
+        </div>
+
+        <div id="container">
+            <section class="panel" id="mapPanel">
+                <div class="panelTitle">Main Game Window</div>
+                <div id="mapCanvasWrap">
+                    <canvas id="map"></canvas>
+                </div>
+            </section>
+
+            <section class="panel" id="narrativePanel">
+                <div class="panelTitle">AI Narrative Window</div>
+                <div id="narrative" class="panelBody"></div>
+            </section>
+
+            <section class="panel" id="chatPanel">
+                <div class="panelTitle">Chat Panel</div>
+                <div id="chatMessages" class="panelBody"></div>
+                <div class="chatInputRow">
+                    <input id="chatInput" placeholder="Type chat message...">
+                    <button onclick="sendChat()">Send</button>
+                </div>
+            </section>
+
+            <section class="panel" id="controlsPanel">
+                <div class="panelTitle">Map Interactive Responses Panel</div>
+                <div id="controlsBody" class="panelBody"></div>
+            </section>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

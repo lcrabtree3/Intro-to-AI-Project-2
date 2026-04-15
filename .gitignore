@@ -1,0 +1,72 @@
+# ========================
+# OS / Editor
+# ========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ========================
+# Python
+# ========================
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ========================
+# C++ / CMake (backend)
+# ========================
+backend/build/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dll
+CMakeCache.txt
+CMakeFiles/
+
+# ========================
+# Node / Frontend
+# ========================
+node_modules/
+dist/
+build/
+
+# ========================
+# Training / ML artifacts
+# ========================
+# checkpoints & outputs
+training/output_gpt2_dungeon/
+*.pt
+*.bin
+*.ckpt
+
+# large model files
+*.gguf
+*.ggml
+*.safetensors
+
+# logs
+*.log
+
+# ========================
+# llama.cpp (important)
+# ========================
+# ignore builds but keep source
+llama.cpp/build/
+llama.cpp/*.o
+llama.cpp/*.exe
+
+# ========================
+# Misc
+# ========================
+*.tmp
+*.swp
