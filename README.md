@@ -33,3 +33,18 @@ cd build
 cmake ..
 make
 ./server
+```
+
+## GPT-2 setup for AI summary
+
+Install Python dependencies for local GPT-2 summary generation:
+
+```bash
+python -m pip install torch transformers
+```
+
+If `python` is not available, use:
+
+```bash
+py -m pip install torch transformers
+```

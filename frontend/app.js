@@ -291,11 +291,16 @@ function renderNarrative() {
     const playerTurnText = state.inCombat
         ? `Combat turn: Player ${state.currentTurn + 1}`
         : `Exploration turn: Player ${state.currentTurn + 1}`;
+    const aiSummary = state.summary || "No summary available yet.";
 
     narrativeEl.innerHTML = `
         <div class="summaryBox">
             <div class="panelSection"><strong>AI Narrative</strong></div>
             <div class="panelSection">${escapeHtml(state.narrative || "The world is quiet.")}</div>
+        </div>
+        <div class="summaryBox">
+            <div class="panelSection"><strong>AI Summary</strong></div>
+            <div class="panelSection">${escapeHtml(aiSummary)}</div>
         </div>
         <div class="summaryBox">
             <div class="panelSection"><strong>Status</strong></div>

@@ -327,6 +327,7 @@ json GameState::toJSON() {
         {"currentTurn", currentTurn},
         {"chat", chatLog},
         {"narrative", lastNarrative},
+        {"summary", summarizeNarrative(lastNarrative)},
         {"modelLoaded", isNarrativeModelLoaded()}
     };
 }

@@ -27,12 +27,14 @@ namespace {
         return s.substr(start, end - start + 1);
     }
 
-    std::string shellEscapeSingleQuotes(const std::string& input) {
+    std::string sanitizePromptArg(const std::string& input) {
         std::string out;
-        out.reserve(input.size() + 16);
+        out.reserve(input.size());
         for (char c : input) {
-            if (c == '\'') {
-                out += "'\\''";
+            if (c == '"') {
+                out += '\'';
+            } else if (c == '\n' || c == '\r') {
+                out += ' ';
             } else {
                 out += c;
             }
@@ -44,6 +46,13 @@ namespace {
         std::ostringstream out;
         out << "AI Narrative: " << truncateContext(context);
         return out.str();
+    }
+
+    std::string fallbackSummary(const std::string& narrative) {
+        if (narrative.empty()) {
+            return "No narrative available yet.";
+        }
+        return "Summary: " + truncateContext(narrative, 220);
     }
 
     std::string buildPrompt(const std::string& context) {
@@ -125,14 +134,14 @@ std::string generateNarrative(const std::string& context) {
 
     std::ostringstream cmd;
     cmd
-        << "'" << g_config.cliPath << "' "
-        << "-m '" << g_config.modelPath << "' "
+        << "\"" << g_config.cliPath << "\" "
+        << "-m \"" << g_config.modelPath << "\" "
         << "-n " << g_config.maxTokens << " "
         << "-c " << g_config.contextWindow << " "
         << "--temp " << g_config.temperature << " "
         << "--simple-io "
         << "--no-display-prompt "
-        << "-p '" << shellEscapeSingleQuotes(prompt) << "' 2>/dev/null";
+        << "-p \"" << sanitizePromptArg(prompt) << "\" 2>NUL";
 
     std::string rawOutput = runCommandCapture(cmd.str());
     std::string cleaned = trim(rawOutput);
@@ -156,4 +165,52 @@ std::string generateNarrative(const std::string& context) {
     }
 
     return cleaned.empty() ? fallbackNarrative(context) : cleaned;
+}
+
+std::string summarizeNarrative(const std::string& narrative) {
+    if (narrative.empty()) {
+        return "No narrative available yet.";
+    }
+
+    if (!g_modelLoaded) {
+        return fallbackSummary(narrative);
+    }
+
+    std::ostringstream prompt;
+    prompt
+        << "Summarize the following game narrative in one concise sentence. "
+        << "Preserve key game facts such as player actions, inventory, portal, and combat outcome when present.\n\n"
+        << "Narrative:\n"
+        << truncateContext(narrative, 700)
+        << "\n\nSummary:\n";
+
+    std::ostringstream cmd;
+    cmd
+        << "\"" << g_config.cliPath << "\" "
+        << "-m \"" << g_config.modelPath << "\" "
+        << "-n 40 "
+        << "-c " << g_config.contextWindow << " "
+        << "--temp 0.4 "
+        << "--simple-io "
+        << "--no-display-prompt "
+        << "-p \"" << sanitizePromptArg(prompt.str()) << "\" 2>NUL";
+
+    std::string rawOutput = runCommandCapture(cmd.str());
+    std::string cleaned = trim(rawOutput);
+
+    if (cleaned.empty()) {
+        return fallbackSummary(narrative);
+    }
+
+    std::size_t summaryPos = cleaned.find("Summary:");
+    if (summaryPos != std::string::npos) {
+        cleaned = trim(cleaned.substr(summaryPos + 8));
+    }
+
+    std::size_t stopPos = cleaned.find("<|");
+    if (stopPos != std::string::npos) {
+        cleaned = trim(cleaned.substr(0, stopPos));
+    }
+
+    return cleaned.empty() ? fallbackSummary(narrative) : cleaned;
 }

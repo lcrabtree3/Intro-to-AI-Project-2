@@ -12,5 +12,6 @@ struct NarrativeConfig {
 
 bool initializeNarrativeModel(const NarrativeConfig& config);
 std::string generateNarrative(const std::string& context);
+std::string summarizeNarrative(const std::string& narrative);
 bool isNarrativeModelLoaded();
 std::string getNarrativeModelStatus();
