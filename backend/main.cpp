@@ -52,6 +52,27 @@ static void broadcastState() {
     }
 }
 
+static int resolveActingPlayerId(SocketType* ws, const json& msg) {
+    const int socketPlayerId = ws->getUserData()->playerId;
+    if (socketPlayerId < 0 || socketPlayerId > 1) {
+        return -1;
+    }
+
+    const int requestedPlayerId = msg.value("player", socketPlayerId);
+    const bool isValidRequested = requestedPlayerId >= 0 && requestedPlayerId <= 1;
+    if (!isValidRequested) {
+        return socketPlayerId;
+    }
+
+    // Allow one-client local testing to control both players from a single browser.
+    if (clients.size() <= 1) {
+        return requestedPlayerId;
+    }
+
+    // In multi-client mode, keep each socket bound to its assigned player.
+    return socketPlayerId;
+}
+
 int main() {
     std::srand(static_cast<unsigned int>(std::time(nullptr)));
 
@@ -83,7 +104,7 @@ int main() {
             try {
                 json msg = json::parse(message);
                 std::string type = msg.value("type", "");
-                int playerId = ws->getUserData()->playerId;
+                int playerId = resolveActingPlayerId(ws, msg);
 
                 if (playerId < 0 || playerId > 1) {
                     sendState(ws);

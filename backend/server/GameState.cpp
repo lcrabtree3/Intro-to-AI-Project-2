@@ -173,13 +173,15 @@ void GameState::movePlayer(int id, int dx, int dy) {
     lastNarrative = generateNarrative(
         "Exploration update. Player " + std::to_string(id + 1) +
         " moves to tile (" + std::to_string(players[id].x) + "," + std::to_string(players[id].y) + "). "
+        "Current terrain type at destination=" + std::to_string(map[players[id].y][players[id].x]) + ". "
+        "Portal status: unlocked=" + yesNo(portalUnlocked) + ", position=(" +
+            std::to_string(portalX) + "," + std::to_string(portalY) + "). "
         "Player 1 inventory: weapons=" + std::to_string(countItem(0, WEAPON)) +
         ", potions=" + std::to_string(countItem(0, POTION)) +
         ", key=" + yesNo(playerHasItem(0, KEY)) + ". "
         "Player 2 inventory: weapons=" + std::to_string(countItem(1, WEAPON)) +
         ", potions=" + std::to_string(countItem(1, POTION)) +
-        ", key=" + yesNo(playerHasItem(1, KEY)) + ". "
-        "Describe the newly explored area in a fantasy tone."
+        ", key=" + yesNo(playerHasItem(1, KEY)) + "."
     );
 
     nextTurn();
@@ -191,6 +193,9 @@ void GameState::processAction(int id, const std::string& action) {
     lastNarrative = generateNarrative(
         "Action update. Player " + std::to_string(id + 1) +
         " attempts the following action: " + action + ". "
+        "World context: portalUnlocked=" + yesNo(portalUnlocked) +
+        ", inCombat=" + yesNo(inCombat) +
+        ", currentTurnPlayer=" + std::to_string(currentTurn + 1) + ". "
         "Player 1 status: health=" + std::to_string(players[0].health) +
         ", weapons=" + std::to_string(countItem(0, WEAPON)) +
         ", potions=" + std::to_string(countItem(0, POTION)) +
@@ -198,8 +203,7 @@ void GameState::processAction(int id, const std::string& action) {
         "Player 2 status: health=" + std::to_string(players[1].health) +
         ", weapons=" + std::to_string(countItem(1, WEAPON)) +
         ", potions=" + std::to_string(countItem(1, POTION)) +
-        ", key=" + yesNo(playerHasItem(1, KEY)) + ". "
-        "Narrate the result while respecting the inventory and current world state."
+        ", key=" + yesNo(playerHasItem(1, KEY)) + "."
     );
 
     nextTurn();

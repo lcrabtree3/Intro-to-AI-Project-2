@@ -1,10 +1,10 @@
-const ws = new WebSocket("ws://localhost:9001");
+const socketsByPlayer = new Map();
 
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
 
 let state = null;
-let myPlayerId = 0;
+let viewedPlayerId = 0;
 let selectedDescription = "Click a revealed tile, item, portal, or player for details.";
 
 const MAP_TILES = 20;
@@ -19,27 +19,85 @@ const controlsBodyEl = document.getElementById("controlsBody");
 const inventoryEl = document.getElementById("inventory");
 const statusEl = document.getElementById("status");
 
-ws.onopen = () => {
-    statusEl.innerText = `Connected as Player ${myPlayerId + 1}`;
-};
+function openPlayerSocket() {
+    const ws = new WebSocket("ws://localhost:9001");
 
-ws.onclose = () => {
-    statusEl.innerText = "Disconnected from server";
-};
+    ws.onclose = () => {
+        for (const [playerId, playerSocket] of socketsByPlayer.entries()) {
+            if (playerSocket === ws) {
+                socketsByPlayer.delete(playerId);
+                break;
+            }
+        }
+        if (state) render();
+    };
 
-ws.onerror = () => {
-    statusEl.innerText = "WebSocket error";
-};
+    ws.onerror = () => {
+        statusEl.innerText = "WebSocket error";
+    };
 
-ws.onmessage = (msg) => {
-    state = JSON.parse(msg.data);
-    render();
-};
+    ws.onmessage = (msg) => {
+        const incomingState = JSON.parse(msg.data);
+        const socketPlayerId = incomingState.yourPlayerId;
+        if (typeof socketPlayerId === "number" && socketPlayerId >= 0 && socketPlayerId <= 1) {
+            socketsByPlayer.set(socketPlayerId, ws);
+        }
+        state = incomingState;
+        render();
+    };
+}
 
-function sendMessage(payload) {
-    if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(payload));
+openPlayerSocket();
+openPlayerSocket();
+
+function getSocketForPlayer(playerId) {
+    const ws = socketsByPlayer.get(playerId);
+    if (ws && ws.readyState === WebSocket.OPEN) return ws;
+    return null;
+}
+
+function getAnyOpenSocket() {
+    for (const ws of socketsByPlayer.values()) {
+        if (ws.readyState === WebSocket.OPEN) return ws;
     }
+    return null;
+}
+
+function canControlPlayer(playerId) {
+    return Boolean(getSocketForPlayer(playerId));
+}
+
+function sendMessage(payload, playerId = getActivePlayerId()) {
+    const targetSocket = getSocketForPlayer(playerId) || getAnyOpenSocket();
+    if (targetSocket && targetSocket.readyState === WebSocket.OPEN) {
+        targetSocket.send(JSON.stringify(payload));
+    }
+}
+
+function getActivePlayerId() {
+    return viewedPlayerId;
+}
+
+function sanitizeNarrativeForDisplay(rawNarrative) {
+    const text = String(rawNarrative || "").trim();
+    if (!text) return "The world is quiet.";
+
+    const looksLikeStats = text.includes("Player 1 inventory") ||
+        text.includes("Player 2 inventory") ||
+        text.includes("weapons=") ||
+        text.includes("potions=") ||
+        text.includes("key=") ||
+        text.includes("health=") ||
+        text.includes("Describe the newly explored area in a fantasy tone.") ||
+        text.includes("Narrate the result while respecting");
+
+    if (!looksLikeStats) {
+        return text;
+    }
+
+    const activePlayerId = getActivePlayerId();
+    const p = `Player ${activePlayerId + 1}`;
+    return `${p} advances through the wild frontier, scanning the land for signs of the hidden key while the ancient portal stirs in the distance.`;
 }
 
 function sendAction() {
@@ -48,10 +106,11 @@ function sendAction() {
 
     const action = input.value.trim();
     if (!action) return;
+    const activePlayerId = getActivePlayerId();
 
     sendMessage({
         type: "action",
-        player: myPlayerId,
+        player: activePlayerId,
         action
     });
 
@@ -61,10 +120,11 @@ function sendAction() {
 function sendChat() {
     const text = chatInputEl.value.trim();
     if (!text) return;
+    const activePlayerId = getActivePlayerId();
 
     sendMessage({
         type: "chat",
-        player: myPlayerId,
+        player: activePlayerId,
         text
     });
 
@@ -82,29 +142,31 @@ function move(dx, dy) {
         return;
     }
 
-    if (state.currentTurn !== myPlayerId) {
+    const activePlayerId = getActivePlayerId();
+    if (state.currentTurn !== activePlayerId) {
         statusEl.innerText = `Waiting for Player ${state.currentTurn + 1}`;
         return;
     }
 
     sendMessage({
         type: "move",
-        player: myPlayerId,
+        player: activePlayerId,
         dx,
         dy
     });
 
-    statusEl.innerText = `Player ${myPlayerId + 1} moved. Waiting for update...`;
+    statusEl.innerText = `Player ${activePlayerId + 1} moved. Waiting for update...`;
 }
 
 function chooseCombat(choice) {
     if (!state) return;
     if (!state.inCombat) return;
-    if (state.currentTurn !== myPlayerId) return;
+    const activePlayerId = getActivePlayerId();
+    if (state.currentTurn !== activePlayerId) return;
 
     sendMessage({
         type: "combat",
-        player: myPlayerId,
+        player: activePlayerId,
         choice
     });
 }
@@ -112,17 +174,18 @@ function chooseCombat(choice) {
 function usePotion() {
     if (!state) return;
     if (!state.inCombat) return;
-    if (state.currentTurn !== myPlayerId) return;
+    const activePlayerId = getActivePlayerId();
+    if (state.currentTurn !== activePlayerId) return;
 
     sendMessage({
         type: "usePotion",
-        player: myPlayerId
+        player: activePlayerId
     });
 }
 
 function switchPlayer(id) {
-    myPlayerId = id;
-    statusEl.innerText = `Connected as Player ${myPlayerId + 1}`;
+    if (id !== 0 && id !== 1) return;
+    viewedPlayerId = id;
     render();
 }
 
@@ -199,12 +262,16 @@ function render() {
     renderInventory();
     renderControls();
 
-    if (state.currentTurn === myPlayerId && !state.inCombat) {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — your turn`;
-    } else if (state.currentTurn === myPlayerId && state.inCombat) {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — combat turn`;
+    const activeView = getActivePlayerId();
+    const connectedPlayers = [...socketsByPlayer.keys()].map((p) => `P${p + 1}`).sort().join(", ") || "none";
+    if (!canControlPlayer(activeView)) {
+        statusEl.innerText = `Connected players: ${connectedPlayers} — viewing Player ${activeView + 1} (not connected)`;
+    } else if (state.currentTurn === activeView && !state.inCombat) {
+        statusEl.innerText = `Connected players: ${connectedPlayers} — viewing Player ${activeView + 1} turn ready`;
+    } else if (state.currentTurn === activeView && state.inCombat) {
+        statusEl.innerText = `Connected players: ${connectedPlayers} — viewing Player ${activeView + 1} combat turn`;
     } else {
-        statusEl.innerText = `Connected as Player ${myPlayerId + 1} — waiting for Player ${state.currentTurn + 1}`;
+        statusEl.innerText = `Connected players: ${connectedPlayers} — viewing Player ${activeView + 1}, waiting for Player ${state.currentTurn + 1}`;
     }
 }
 
@@ -293,10 +360,11 @@ function renderNarrative() {
         : `Exploration turn: Player ${state.currentTurn + 1}`;
     const aiSummary = state.summary || "No summary available yet.";
 
+    const cleanedNarrative = sanitizeNarrativeForDisplay(state.narrative);
     narrativeEl.innerHTML = `
         <div class="summaryBox">
             <div class="panelSection"><strong>AI Narrative</strong></div>
-            <div class="panelSection">${escapeHtml(state.narrative || "The world is quiet.")}</div>
+            <div class="panelSection">${escapeHtml(cleanedNarrative)}</div>
         </div>
         <div class="summaryBox">
             <div class="panelSection"><strong>AI Summary</strong></div>
@@ -318,8 +386,9 @@ function renderChat() {
 }
 
 function renderInventory() {
+    const activeView = getActivePlayerId();
     inventoryEl.innerHTML = state.players.map((p, idx) => `
-        <div class="inventoryBlock ${idx === myPlayerId ? "activePlayer" : ""}">
+        <div class="inventoryBlock ${idx === activeView ? "activePlayer" : ""}">
             <div><strong>Player ${idx + 1}</strong></div>
             <div>Health: ${p.health}</div>
             <div>Weapons: ${p.weaponCount}</div>
@@ -333,8 +402,11 @@ function renderInventory() {
 function renderControls() {
     if (!state) return;
 
-    const isMyTurn = state.currentTurn === myPlayerId;
-    const turnText = isMyTurn ? "Your turn" : `Waiting for Player ${state.currentTurn + 1}`;
+    const activeView = getActivePlayerId();
+    const isMyTurn = state.currentTurn === activeView && canControlPlayer(activeView);
+    const turnText = isMyTurn
+        ? `Player ${activeView + 1} turn`
+        : `Waiting for Player ${state.currentTurn + 1}`;
 
     if (state.inCombat) {
         controlsBodyEl.innerHTML = `
@@ -350,6 +422,11 @@ function renderControls() {
                 <button id="use-potion" ${!isMyTurn ? "disabled" : ""}>Use Potion</button>
             </div>
 
+            <div class="playerSwitchRow">
+                <button id="switch-p1" ${activeView === 0 ? "disabled" : ""}>View as Player 1</button>
+                <button id="switch-p2" ${activeView === 1 ? "disabled" : ""}>View as Player 2</button>
+            </div>
+
             <div class="selectionBox">
                 <div class="panelSection"><strong>Selected Tile / Object</strong></div>
                 <div class="panelSection">${escapeHtml(selectedDescription)}</div>
@@ -360,6 +437,8 @@ function renderControls() {
         document.getElementById("combat-paper")?.addEventListener("click", () => chooseCombat("paper"));
         document.getElementById("combat-scissors")?.addEventListener("click", () => chooseCombat("scissors"));
         document.getElementById("use-potion")?.addEventListener("click", () => usePotion());
+        document.getElementById("switch-p1")?.addEventListener("click", () => switchPlayer(0));
+        document.getElementById("switch-p2")?.addEventListener("click", () => switchPlayer(1));
         return;
     }
 
@@ -389,8 +468,8 @@ function renderControls() {
                 </div>
 
                 <div class="playerSwitchRow">
-                    <button id="switch-p1">View as Player 1</button>
-                    <button id="switch-p2">View as Player 2</button>
+                    <button id="switch-p1" ${activeView === 0 ? "disabled" : ""}>View as Player 1</button>
+                    <button id="switch-p2" ${activeView === 1 ? "disabled" : ""}>View as Player 2</button>
                 </div>
             </div>
         </div>
